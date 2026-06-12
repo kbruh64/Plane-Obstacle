@@ -1,0 +1,8 @@
+Model Information:
+* title:	Sci-Fi Train
+* source:	https://sketchfab.com/3d-models/sci-fi-train-40ab7e9571f940baa7681333195e1b46
+* author:	abhayexe (https://sketchfab.com/abhayexe)
+
+Model License:
+* license type:	SKETCHFAB Standard (https://sketchfab.com/licenses)
+* requirements:	Under basic restrictions, use worldwide, on all types of media, commercially or not, and in all types of derivative works

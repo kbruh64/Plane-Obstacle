@@ -1,0 +1,19 @@
+{
+  "name": "comet88-dodger",
+  "version": "1.0.0",
+  "description": "3D plane dodging game (Three.js) — runs in the browser or as an Electron desktop app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "web": "http-server . -p 5173 -c-1 -o"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "http-server": "^14.1.1"
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  }
+}

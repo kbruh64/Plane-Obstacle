@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>COMET 88 — Plane Dodger</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #05060f; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    /* ---- HUD ---- */
+    #hud {
+      position: fixed; top: 0; left: 0; right: 0;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding: 18px 24px; pointer-events: none;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #cfe8ff; text-shadow: 0 0 8px rgba(0, 150, 255, .6);
+      user-select: none;
+    }
+    #hud .label { font-size: 12px; letter-spacing: 3px; opacity: .7; }
+    #hud .value { font-size: 30px; font-weight: 700; }
+    #hud .right { text-align: right; }
+
+    /* ---- Laser charge meter (bottom center) ---- */
+    #laser {
+      position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+      width: 320px; text-align: center; pointer-events: none; user-select: none;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #laserLabel {
+      font-size: 12px; letter-spacing: 3px; color: #9fdcff; margin-bottom: 6px;
+      text-shadow: 0 0 8px rgba(0,150,255,.6);
+    }
+    #laserLabel.ready { color: #aaffe9; text-shadow: 0 0 14px rgba(80,255,210,.9); }
+    #laserBar {
+      height: 10px; border-radius: 999px; overflow: hidden;
+      background: rgba(120,170,220,.15); border: 1px solid rgba(140,200,255,.35);
+    }
+    #laserFill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #1f8cff, #66faff);
+      box-shadow: 0 0 12px rgba(80,220,255,.8); transition: width .12s linear;
+    }
+    #laserLabel.ready + #laserBar #laserFill {
+      background: linear-gradient(90deg, #28ffc0, #aaffe9);
+      animation: laserpulse .9s ease-in-out infinite;
+    }
+    @keyframes laserpulse { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.6)} }
+
+    /* ---- Overlays ---- */
+    .overlay {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      justify-content: center; align-items: center; text-align: center;
+      font-family: 'Segoe UI', system-ui, sans-serif; color: #eaf6ff;
+      background: radial-gradient(ellipse at center, rgba(8,12,30,.6), rgba(2,3,10,.92));
+      backdrop-filter: blur(2px); user-select: none; z-index: 10;
+    }
+    .overlay.hidden { display: none; }
+    .overlay h1 { font-size: 56px; letter-spacing: 6px; margin-bottom: 8px;
+      text-shadow: 0 0 24px rgba(0,180,255,.8); }
+    .overlay h2 { font-size: 26px; color: #ff5577; letter-spacing: 4px;
+      text-shadow: 0 0 18px rgba(255,40,80,.8); margin-bottom: 10px; }
+    .overlay p { font-size: 16px; opacity: .85; margin: 4px 0; max-width: 520px; line-height: 1.5; }
+    .overlay .big-score { font-size: 40px; font-weight: 700; margin: 14px 0; color: #ffe082; }
+    .overlay .hint {
+      margin-top: 26px; font-size: 14px; letter-spacing: 2px; opacity: .75;
+      border: 1px solid rgba(140,200,255,.4); padding: 12px 26px; border-radius: 999px;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:.55} 50%{opacity:1} }
+    #loading { z-index: 20; }
+  </style>
+
+  <!-- Import map lets game.js use bare "three" specifiers, loaded from local node_modules -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./node_modules/three/build/three.module.js",
+      "three/addons/": "./node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <div class="left">
+      <div class="label">SCORE</div>
+      <div class="value" id="score">0</div>
+    </div>
+    <div class="right">
+      <div class="label">SPEED</div>
+      <div class="value" id="speed">1.0x</div>
+    </div>
+  </div>
+
+  <!-- Laser charge meter -->
+  <div id="laser">
+    <div id="laserLabel">LASER 0%</div>
+    <div id="laserBar"><div id="laserFill"></div></div>
+  </div>
+
+  <!-- Loading overlay -->
+  <div class="overlay" id="loading">
+    <h1>COMET 88</h1>
+    <p id="loadtext">Spinning up the engines…</p>
+  </div>
+
+  <!-- Start overlay -->
+  <div class="overlay hidden" id="start">
+    <h1>COMET 88</h1>
+    <p>Fly down the sci-fi tunnel and dodge the concrete blocks.</p>
+    <p>Move with <b>WASD</b> (or arrow keys / mouse).</p>
+    <p>Your <b>laser charges every 30s</b> — hit <b>SPACE</b> to blast through blocks you can't dodge.</p>
+    <div class="hint">CLICK to launch</div>
+  </div>
+
+  <!-- Game over overlay -->
+  <div class="overlay hidden" id="gameover">
+    <h2>CRASHED</h2>
+    <div class="label" style="letter-spacing:4px;opacity:.6">FINAL SCORE</div>
+    <div class="big-score" id="finalScore">0</div>
+    <p id="bestText">Best: 0</p>
+    <div class="hint">CLICK or PRESS SPACE to fly again</div>
+  </div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

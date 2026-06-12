@@ -1,0 +1,11 @@
+Model Information:
+* title:	concrete blocks
+* source:	https://sketchfab.com/3d-models/concrete-blocks-dfe58ece9b5e43e58f06b32025f8133a
+* author:	kakap649 (https://sketchfab.com/kakap649)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "concrete blocks" (https://sketchfab.com/3d-models/concrete-blocks-dfe58ece9b5e43e58f06b32025f8133a) by kakap649 (https://sketchfab.com/kakap649) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

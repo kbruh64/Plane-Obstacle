@@ -1,0 +1,23 @@
+# Dependencies — restored by `npm install`, never commit (electron.exe is >100MB)
+node_modules/
+
+# npm logs / cache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# Dev screenshot artifacts from the capture harness
+shot_*.png
+shotlog.txt
+shoterr.txt
+elog.txt
+olog.txt
+fin_out.txt
+fin_err.txt
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+.vscode/
+*.log
