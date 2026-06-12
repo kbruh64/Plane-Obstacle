@@ -15,7 +15,7 @@ const CFG = {
   // World scrolls toward -Z. The player sits near z=0; obstacles spawn far -Z.
   laneHalfWidth: 12,        // player X movement clamp (inside the corridor)
   ceiling: 9,               // player Y upper clamp
-  floor: 1.0,               // player Y lower clamp
+  floor: 2.4,               // player Y lower clamp (plane is ~3.6 tall; belly stays above the floor)
   baseSpeed: 70,            // world units / sec at speedMult = 1
   speedRampPerSec: 0.9,     // speed multiplier gain per second survived
   maxSpeedMult: 4.5,

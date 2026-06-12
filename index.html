@@ -72,12 +72,14 @@
     #loading { z-index: 20; }
   </style>
 
-  <!-- Import map lets game.js use bare "three" specifiers, loaded from local node_modules -->
+  <!-- Import map lets game.js use bare "three" specifiers. Three.js is vendored
+       into ./vendor so the same paths work in Electron, locally, and on static
+       hosts like Vercel (node_modules is not deployed). -->
   <script type="importmap">
   {
     "imports": {
-      "three": "./node_modules/three/build/three.module.js",
-      "three/addons/": "./node_modules/three/examples/jsm/"
+      "three": "./vendor/three.module.js",
+      "three/addons/": "./vendor/addons/"
     }
   }
   </script>
