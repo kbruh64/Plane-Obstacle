@@ -15,7 +15,7 @@ const CFG = {
   // World scrolls toward -Z. The player sits near z=0; obstacles spawn far -Z.
   laneHalfWidth: 12,        // player X movement clamp (inside the corridor)
   ceiling: 9,               // player Y upper clamp
-  floor: 2.4,               // player Y lower clamp (plane is ~3.6 tall; belly stays above the floor)
+  floor: 2.8,               // player Y lower clamp (plane ~3.6 tall + pitch dip margin above the deck)
   baseSpeed: 70,            // world units / sec at speedMult = 1
   speedRampPerSec: 0.045,   // speed multiplier gain per second survived (slow burn)
   maxSpeedMult: 4.5,
@@ -159,6 +159,129 @@ class TunnelFactory {
 }
 
 // ============================================================================
+//  AUDIO — procedural WebAudio: synth music loop + SFX, no audio files needed.
+//  The AudioContext is created/resumed on the first user gesture (startRun).
+// ============================================================================
+class AudioEngine {
+  constructor() {
+    this.ctx = null;
+    this.muted = false;
+    this.musicOn = false;
+    this._timer = null;
+  }
+
+  // Create/resume the context. Must be called from a user-gesture handler.
+  unlock() {
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.55;
+      this.master.connect(this.ctx.destination);
+      this.musicBus = this.ctx.createGain();
+      this.musicBus.gain.value = 0.3;
+      this.musicBus.connect(this.master);
+      this.sfxBus = this.ctx.createGain();
+      this.sfxBus.gain.value = 0.9;
+      this.sfxBus.connect(this.master);
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.55;
+    return this.muted;
+  }
+
+  // One enveloped oscillator note. opts: f, f2(optional glide), dur, type, vol, t, bus
+  tone(opts) {
+    if (!this.ctx) return;
+    const t = opts.t !== undefined ? opts.t : this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = opts.type || 'sine';
+    o.frequency.setValueAtTime(opts.f, t);
+    if (opts.f2) o.frequency.exponentialRampToValueAtTime(opts.f2, t + opts.dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(opts.vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + opts.dur);
+    o.connect(g); g.connect(opts.bus || this.sfxBus);
+    o.start(t); o.stop(t + opts.dur + 0.05);
+  }
+
+  // Filtered noise burst. opts: dur, vol, freq(lowpass), t
+  noise(opts) {
+    if (!this.ctx) return;
+    const t = opts.t !== undefined ? opts.t : this.ctx.currentTime;
+    const len = Math.max(1, Math.floor(this.ctx.sampleRate * opts.dur));
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const fl = this.ctx.createBiquadFilter();
+    fl.type = 'lowpass';
+    fl.frequency.value = opts.freq || 2000;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(opts.vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + opts.dur);
+    src.connect(fl); fl.connect(g); g.connect(this.sfxBus);
+    src.start(t); src.stop(t + opts.dur + 0.05);
+  }
+
+  play(name) {
+    if (!this.ctx || this.muted) return;
+    switch (name) {
+      case 'laser':  this.tone({ f: 1400, f2: 110, dur: 0.4, type: 'sawtooth', vol: 0.4 });
+                     this.noise({ dur: 0.3, vol: 0.14, freq: 6500 }); break;
+      case 'break':  this.noise({ dur: 0.3, vol: 0.35, freq: 900 });
+                     this.tone({ f: 95, f2: 42, dur: 0.25, type: 'sine', vol: 0.4 }); break;
+      case 'crash':  this.noise({ dur: 0.9, vol: 0.5, freq: 500 });
+                     this.tone({ f: 75, f2: 28, dur: 0.9, type: 'sine', vol: 0.6 }); break;
+      case 'ready':  this.tone({ f: 880, dur: 0.1, type: 'sine', vol: 0.22 });
+                     this.tone({ f: 1318, dur: 0.18, type: 'sine', vol: 0.22, t: this.ctx.currentTime + 0.09 }); break;
+      case 'denied': this.tone({ f: 150, dur: 0.12, type: 'square', vol: 0.16 }); break;
+      case 'start':  this.tone({ f: 220, f2: 880, dur: 0.45, type: 'triangle', vol: 0.3 }); break;
+      case 'roll':   this.noise({ dur: 0.35, vol: 0.18, freq: 3200 });
+                     this.tone({ f: 300, f2: 720, dur: 0.3, type: 'triangle', vol: 0.16 }); break;
+    }
+  }
+
+  music(on) {
+    if (!this.ctx) return;
+    if (on && !this.musicOn) {
+      this.musicOn = true;
+      this._step = 0;
+      this._nextT = this.ctx.currentTime + 0.05;
+      this._timer = setInterval(() => this._schedule(), 60);
+    } else if (!on && this.musicOn) {
+      this.musicOn = false;
+      clearInterval(this._timer);
+    }
+  }
+
+  // Lookahead scheduler: dark synthwave loop — bass + arp + hat ticks.
+  _schedule() {
+    const spb = 60 / 132; // seconds per beat @132bpm
+    while (this._nextT < this.ctx.currentTime + 0.25) {
+      const s = this._step % 16;
+      const bar = Math.floor(this._step / 16) % 4;
+      if (s % 4 === 0) {
+        const bass = [55, 55, 65.41, 48.99][bar]; // A1 A1 C2 G1
+        this.tone({ f: bass, dur: spb * 0.85, type: 'sawtooth', vol: 0.15, t: this._nextT, bus: this.musicBus });
+      }
+      const arp = [220, 261.63, 329.63, 440, 392, 329.63, 261.63, 246.94,
+                   220, 261.63, 329.63, 523.25, 440, 392, 329.63, 261.63];
+      this.tone({ f: arp[s], dur: spb * 0.22, type: 'triangle', vol: 0.055, t: this._nextT, bus: this.musicBus });
+      if (s % 2 === 1) this.noise({ dur: 0.03, vol: 0.02, freq: 9000, t: this._nextT });
+      this._nextT += spb / 4;
+      this._step++;
+    }
+  }
+}
+const audio = new AudioEngine();
+
+// ============================================================================
 //  GAME
 // ============================================================================
 class Game {
@@ -186,6 +309,12 @@ class Game {
     this.laserCharge = 0;      // 0..1 (1 = ready)
     this.laser = null;         // beam mesh
     this.laserFlash = 0;       // seconds remaining of visible beam
+
+    // Barrel roll (Q/E): full spin with i-frames while rolling.
+    this.rollT = 0;            // seconds remaining in the current roll
+    this.rollDur = 0.55;
+    this.rollDir = 1;
+    this.rollCooldown = 0;
 
     this.clock = new THREE.Clock(false);
     this._raf = null;
@@ -323,6 +452,10 @@ class Game {
     wrap.scale.setScalar(s);
     wrap.add(inner);
     wrap.userData.fallback = false;
+    // The model's visible deck surface sits ~4.5 units above its base (measured
+    // by raycast). Sink the model so the deck the player sees is near y=0.3 —
+    // otherwise the plane's floor clamp lets it fly inside the deck.
+    wrap.position.y = -4.2;
 
     // The natural tiling length is the model's scaled depth (Z). Store it so the
     // map tiles seamlessly with no stretching and no gaps.
@@ -597,27 +730,25 @@ class Game {
     this.laser.add(core, glow);
     scene.add(this.laser);
 
-    // Nose orb: glows + pulses when the laser is fully charged.
-    this.orbMat = new THREE.MeshBasicMaterial({
-      color: 0x66faff, transparent: true, opacity: 0.0,
-      blending: THREE.AdditiveBlending, depthWrite: false
-    });
-    this.chargeOrb = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 10), this.orbMat);
-    this.chargeOrb.renderOrder = 999;
-    scene.add(this.chargeOrb);
-
     // Point light that flashes with the shot so the beam lights up the tunnel.
     this.laserLight = new THREE.PointLight(0x66faff, 0, 90);
     scene.add(this.laserLight);
   }
 
   fireLaser() {
-    if (this.state !== 'playing' || this.laserCharge < 1) return;
+    if (this.state !== 'playing') return;
+    if (this.laserCharge < 1) {
+      this.laserDenied = 0.6; // HUD flashes red: pressed while still charging
+      audio.play('denied');
+      return;
+    }
     this.laserCharge = 0;
     this.laserFlash = 0.45; // seconds the beam stays visible
+    audio.play('laser');
 
     // Destroy every active obstacle within the beam radius (X/Y) ahead of plane.
     const px = this.player.position.x, py = this.player.position.y;
+    let destroyed = 0;
     for (let i = this.activeObstacles.length - 1; i >= 0; i--) {
       const o = this.activeObstacles[i];
       if (o.position.z > 5) continue; // only what's ahead
@@ -626,8 +757,10 @@ class Game {
         this.releaseObstacle(o);
         this.activeObstacles.splice(i, 1);
         this.score += 5; // small reward for vaporizing a block
+        destroyed++;
       }
     }
+    if (destroyed > 0) audio.play('break');
   }
 
   updateLaser(dt) {
@@ -653,23 +786,21 @@ class Game {
       this.laserLight.intensity = 0;
     }
 
-    // Nose orb: visible and pulsing only when fully charged.
-    if (this.laserCharge >= 1) {
-      const pulse = 0.55 + Math.sin(performance.now() * 0.008) * 0.3;
-      this.orbMat.opacity = pulse;
-      const s = 0.85 + Math.sin(performance.now() * 0.008) * 0.2;
-      this.chargeOrb.scale.setScalar(s);
-      this.chargeOrb.position.set(this.player.position.x, this.player.position.y, this.player.position.z - 6.5);
-    } else {
-      this.orbMat.opacity = 0;
-    }
+    // Ping when the laser finishes charging.
+    const isReady = this.laserCharge >= 1;
+    if (isReady && !this._wasReady) audio.play('ready');
+    this._wasReady = isReady;
 
-    // Update HUD charge meter.
+    // Update HUD charge meter (flash red briefly if fired while not ready).
+    if (this.laserDenied > 0) this.laserDenied -= dt;
+    const denied = this.laserDenied > 0;
     const pct = Math.floor(this.laserCharge * 100);
     if (this.dom.laserFill) this.dom.laserFill.style.width = pct + '%';
     if (this.dom.laserLabel) {
-      this.dom.laserLabel.textContent = this.laserCharge >= 1 ? 'LASER READY — SPACE' : 'LASER ' + pct + '%';
-      this.dom.laserLabel.classList.toggle('ready', this.laserCharge >= 1);
+      this.dom.laserLabel.textContent = denied ? 'CHARGING… ' + pct + '%'
+        : (this.laserCharge >= 1 ? 'LASER READY — SPACE' : 'LASER ' + pct + '%');
+      this.dom.laserLabel.classList.toggle('ready', this.laserCharge >= 1 && !denied);
+      this.dom.laserLabel.classList.toggle('denied', denied);
     }
   }
 
@@ -692,9 +823,20 @@ class Game {
     this.player.position.y += (this.target.y - this.player.position.y) * k;
     this.player.position.z = 0;
 
-    // Bank/pitch the model based on velocity for juice.
-    const vx = this.player.position.x - prevX;
-    this.player.rotation.z = THREE.MathUtils.lerp(this.player.rotation.z, -vx * CFG.planeBankAmount * 6, 0.2);
+    if (this.rollCooldown > 0) this.rollCooldown -= dt;
+    if (this.rollT > 0) {
+      // Barrel roll: full 360° spin + lateral dash; collisions are skipped
+      // while rolling (i-frames in checkCollisions).
+      this.rollT -= dt;
+      const p = 1 - Math.max(0, this.rollT) / this.rollDur; // 0..1 progress
+      this.player.rotation.z = -this.rollDir * Math.PI * 2 * p;
+      this.target.x = THREE.MathUtils.clamp(
+        this.target.x + this.rollDir * 36 * dt, -CFG.laneHalfWidth, CFG.laneHalfWidth);
+    } else {
+      // Bank the model based on velocity for juice.
+      const vx = this.player.position.x - prevX;
+      this.player.rotation.z = THREE.MathUtils.lerp(this.player.rotation.z, -vx * CFG.planeBankAmount * 6, 0.2);
+    }
     this.player.rotation.x = THREE.MathUtils.lerp(this.player.rotation.x, (this.target.y - this.player.position.y) * -0.05, 0.2);
 
     // Camera gently follows the plane on X for a chase feel.
@@ -702,9 +844,19 @@ class Game {
     camera.lookAt(this.player.position.x * 0.3, this.player.position.y, -40);
   }
 
+  // Trigger a barrel roll (Q = left, E = right). I-frames while rolling.
+  startRoll(dir) {
+    if (this.state !== 'playing' || this.rollT > 0 || this.rollCooldown > 0) return;
+    this.rollDir = dir;
+    this.rollT = this.rollDur;
+    this.rollCooldown = 1.6;
+    audio.play('roll');
+  }
+
   // ---- AABB collision via THREE.Box3 --------------------------------------
   checkCollisions() {
     if (this.invincible) return; // dev screenshot mode
+    if (this.rollT > 0) return;  // barrel-roll i-frames: untouchable mid-roll
     _planeBox.setFromObject(this.player);
     // Shrink the plane box a touch so clipping a wingtip feels fair.
     _planeBox.expandByScalar(-0.6);
@@ -736,9 +888,15 @@ class Game {
     this.runTime = 0;
     this.difficulty = 0;
     this._spawnAccum = 0;
-    this.laserCharge = 0;
+    this.laserCharge = 1; // start armed — fire right away, then recharge over 30s
     this.laserFlash = 0;
+    this.laserDenied = 0;
+    this.rollT = 0;
+    this.rollCooldown = 0;
     this.target.set(0, 6, 0);
+    audio.unlock();        // safe here: startRun is always a user gesture
+    audio.play('start');
+    audio.music(true);
     if (this.player) this.player.position.set(0, 6, 0);
 
     // Clear any leftover obstacles.
@@ -754,6 +912,12 @@ class Game {
   gameOver() {
     this.state = 'dead';
     this.clock.stop();
+    audio.play('crash');
+    audio.music(false);
+    // Kill any in-flight beam flash so it doesn't stay frozen on screen.
+    this.laserFlash = 0;
+    if (this.laserCoreMat) { this.laserCoreMat.opacity = 0; this.laserGlowMat.opacity = 0; }
+    if (this.laserLight) this.laserLight.intensity = 0;
     const final = Math.floor(this.score);
     if (final > this.best) {
       this.best = final;
@@ -820,6 +984,9 @@ class Game {
         else this.handleAdvance();
         e.preventDefault();
       }
+      if (e.code === 'KeyQ') { this.startRoll(-1); e.preventDefault(); }
+      if (e.code === 'KeyE') { this.startRoll(1); e.preventDefault(); }
+      if (e.code === 'KeyM') audio.toggleMute();
     });
     window.addEventListener('keyup', (e) => {
       if (keymap[e.code]) { this.input[keymap[e.code]] = false; e.preventDefault(); }

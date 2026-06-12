@@ -33,6 +33,7 @@
       text-shadow: 0 0 8px rgba(0,150,255,.6);
     }
     #laserLabel.ready { color: #aaffe9; text-shadow: 0 0 14px rgba(80,255,210,.9); }
+    #laserLabel.denied { color: #ff6b6b; text-shadow: 0 0 14px rgba(255,60,60,.9); }
     #laserBar {
       height: 10px; border-radius: 999px; overflow: hidden;
       background: rgba(120,170,220,.15); border: 1px solid rgba(140,200,255,.35);
@@ -114,8 +115,9 @@
   <div class="overlay hidden" id="start">
     <h1>COMET 88</h1>
     <p>Fly down the sci-fi tunnel and dodge the concrete blocks.</p>
-    <p>Move with <b>WASD</b> (or arrow keys).</p>
-    <p>Your <b>laser charges every 30s</b> — hit <b>SPACE</b> to blast through blocks you can't dodge.</p>
+    <p>Move with <b>WASD</b> (or arrow keys). <b>Q / E</b> — barrel roll (untouchable mid-roll).</p>
+    <p>Your laser <b>starts armed</b> — hit <b>SPACE</b> to blast through blocks, then it recharges over 30s.</p>
+    <p><b>M</b> — mute music &amp; sound.</p>
     <div class="hint">CLICK to launch</div>
   </div>
 
