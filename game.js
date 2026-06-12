@@ -17,8 +17,14 @@ const CFG = {
   ceiling: 9,               // player Y upper clamp
   floor: 2.4,               // player Y lower clamp (plane is ~3.6 tall; belly stays above the floor)
   baseSpeed: 70,            // world units / sec at speedMult = 1
-  speedRampPerSec: 0.9,     // speed multiplier gain per second survived
+  speedRampPerSec: 0.045,   // speed multiplier gain per second survived (slow burn)
   maxSpeedMult: 4.5,
+
+  // Difficulty ramps 0 -> 1 over this many seconds, tightening spawn gaps and
+  // making more blocks aim straight at the player.
+  difficultyRampTime: 150,
+  spawnZGapStart: 64,       // distance between obstacle rows at difficulty 0
+  spawnZGapEnd: 26,         // ...and at full difficulty
 
   // Sci-fi "train" is a flat corridor section: scaled uniformly to this width,
   // then tiled at its natural depth (tunnelSegLength is computed at load).
@@ -27,7 +33,6 @@ const CFG = {
   segmentsAhead: 60,        // many short corridor tiles -> long visible track
   segmentsBehind: 2,        // keep this many behind camera before recycling
 
-  obstacleSpawnZGap: 44,    // distance between obstacle "rows" along Z
   obstacleSpawnFarZ: -820,  // where new obstacles enter
   obstacleCullZ: 40,        // obstacles past this (behind player) are recycled
   obstaclePoolSize: 40,
@@ -162,6 +167,8 @@ class Game {
     this.score = 0;
     this.best = Number(localStorage.getItem('comet88_best') || 0);
     this.speedMult = 1;
+    this.runTime = 0;
+    this.difficulty = 0; // 0..1, ramps over difficultyRampTime seconds
     this.worldZ = 0; // accumulated forward travel (segments tile off this)
 
     this.segments = [];
@@ -498,18 +505,20 @@ class Game {
     const span = CFG.laneHalfWidth;
     const slots = [-span * 0.66, 0, span * 0.66];
     const openIndex = Math.floor(Math.random() * slots.length);
+    const diff = this.difficulty || 0;
     for (let i = 0; i < slots.length; i++) {
       if (i === openIndex) continue;
-      if (Math.random() < 0.4) continue; // sparsity
+      // Sparsity: rows start half-empty, fill in as difficulty climbs.
+      if (Math.random() < THREE.MathUtils.lerp(0.55, 0.12, diff)) continue;
       const o = this.acquireObstacle();
       if (!o) break;
       this.ensureObstacleMesh(o);
       o.userData.active = true;
       o.visible = true;
-      // Airborne spawning: ~45% of blocks aim at the player's current altitude
-      // (they come AT you), the rest scatter across the full flyable height.
+      // Airborne spawning: a growing share of blocks aim at the player's
+      // current altitude (they come AT you); the rest scatter vertically.
       let y;
-      if (Math.random() < 0.45 && this.player) {
+      if (Math.random() < THREE.MathUtils.lerp(0.3, 0.65, diff) && this.player) {
         y = this.player.position.y + (Math.random() * 2 - 1);
       } else {
         y = CFG.floor + 2 + Math.random() * (CFG.ceiling - CFG.floor - 2);
@@ -531,9 +540,11 @@ class Game {
   }
 
   updateObstacles(dz, dt) {
-    // Spawn cadence based on traveled distance.
+    // Spawn cadence based on traveled distance; rows pack tighter as the
+    // difficulty ramps up.
+    const gap = THREE.MathUtils.lerp(CFG.spawnZGapStart, CFG.spawnZGapEnd, this.difficulty || 0);
     this._spawnAccum = (this._spawnAccum || 0) + dz;
-    if (this._spawnAccum >= CFG.obstacleSpawnZGap) {
+    if (this._spawnAccum >= gap) {
       this._spawnAccum = 0;
       this.spawnObstacleRow(CFG.obstacleSpawnFarZ);
     }
@@ -555,25 +566,55 @@ class Game {
   }
 
   // ---- Laser --------------------------------------------------------------
-  // A forward beam mesh parented to the plane; charges over laserChargeTime,
-  // fired with Space, destroys every obstacle in a cylinder ahead of the plane.
+  // A two-layer forward beam (bright white core + cyan outer glow) that charges
+  // over laserChargeTime and fires with Space, destroying every obstacle in a
+  // cylinder ahead of the plane. A glowing orb on the nose shows when ready.
   buildLaser() {
-    const geo = new THREE.CylinderGeometry(CFG.laserRadius * 0.5, CFG.laserRadius * 0.25, CFG.laserRange, 12, 1, true);
-    geo.rotateX(-Math.PI / 2);            // align cylinder along -Z
-    geo.translate(0, 0, -CFG.laserRange / 2); // start at plane, extend forward
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0x66faff, transparent: true, opacity: 0.0,
+    this.laser = new THREE.Group();
+
+    // Bright core beam.
+    const coreGeo = new THREE.CylinderGeometry(CFG.laserRadius * 0.25, CFG.laserRadius * 0.15, CFG.laserRange, 10, 1, true);
+    coreGeo.rotateX(-Math.PI / 2);            // align cylinder along -Z
+    coreGeo.translate(0, 0, -CFG.laserRange / 2); // start at plane, extend forward
+    this.laserCoreMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.0,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
     });
-    this.laser = new THREE.Mesh(geo, mat);
-    this.laser.renderOrder = 999;
+    const core = new THREE.Mesh(coreGeo, this.laserCoreMat);
+
+    // Wider soft cyan glow around the core.
+    const glowGeo = new THREE.CylinderGeometry(CFG.laserRadius * 0.9, CFG.laserRadius * 0.45, CFG.laserRange, 12, 1, true);
+    glowGeo.rotateX(-Math.PI / 2);
+    glowGeo.translate(0, 0, -CFG.laserRange / 2);
+    this.laserGlowMat = new THREE.MeshBasicMaterial({
+      color: 0x33e0ff, transparent: true, opacity: 0.0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    });
+    const glow = new THREE.Mesh(glowGeo, this.laserGlowMat);
+
+    core.renderOrder = 999;
+    glow.renderOrder = 998;
+    this.laser.add(core, glow);
     scene.add(this.laser);
+
+    // Nose orb: glows + pulses when the laser is fully charged.
+    this.orbMat = new THREE.MeshBasicMaterial({
+      color: 0x66faff, transparent: true, opacity: 0.0,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    this.chargeOrb = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 10), this.orbMat);
+    this.chargeOrb.renderOrder = 999;
+    scene.add(this.chargeOrb);
+
+    // Point light that flashes with the shot so the beam lights up the tunnel.
+    this.laserLight = new THREE.PointLight(0x66faff, 0, 90);
+    scene.add(this.laserLight);
   }
 
   fireLaser() {
     if (this.state !== 'playing' || this.laserCharge < 1) return;
     this.laserCharge = 0;
-    this.laserFlash = 0.18; // seconds the beam stays visible
+    this.laserFlash = 0.45; // seconds the beam stays visible
 
     // Destroy every active obstacle within the beam radius (X/Y) ahead of plane.
     const px = this.player.position.x, py = this.player.position.y;
@@ -596,12 +637,31 @@ class Game {
     }
     // Position the beam at the plane, pointing forward.
     this.laser.position.copy(this.player.position);
-    // Fade the visible flash.
+
+    // Fade the visible flash (with a slight flicker for energy).
     if (this.laserFlash > 0) {
       this.laserFlash -= dt;
-      this.laser.material.opacity = Math.max(0, this.laserFlash / 0.18) * 0.8;
+      const k = Math.max(0, this.laserFlash / 0.45);
+      const flicker = 0.85 + Math.random() * 0.15;
+      this.laserCoreMat.opacity = k * 0.95 * flicker;
+      this.laserGlowMat.opacity = k * 0.45 * flicker;
+      this.laserLight.intensity = k * 40;
+      this.laserLight.position.set(this.player.position.x, this.player.position.y, -20);
     } else {
-      this.laser.material.opacity = 0;
+      this.laserCoreMat.opacity = 0;
+      this.laserGlowMat.opacity = 0;
+      this.laserLight.intensity = 0;
+    }
+
+    // Nose orb: visible and pulsing only when fully charged.
+    if (this.laserCharge >= 1) {
+      const pulse = 0.55 + Math.sin(performance.now() * 0.008) * 0.3;
+      this.orbMat.opacity = pulse;
+      const s = 0.85 + Math.sin(performance.now() * 0.008) * 0.2;
+      this.chargeOrb.scale.setScalar(s);
+      this.chargeOrb.position.set(this.player.position.x, this.player.position.y, this.player.position.z - 6.5);
+    } else {
+      this.orbMat.opacity = 0;
     }
 
     // Update HUD charge meter.
@@ -673,6 +733,8 @@ class Game {
     // Reset run state.
     this.score = 0;
     this.speedMult = 1;
+    this.runTime = 0;
+    this.difficulty = 0;
     this._spawnAccum = 0;
     this.laserCharge = 0;
     this.laserFlash = 0;
@@ -709,7 +771,9 @@ class Game {
 
     if (this.state === 'playing') {
       // Ramp speed over time.
-      this.speedMult = Math.min(CFG.maxSpeedMult, this.speedMult + CFG.speedRampPerSec * dt * 0.12);
+      this.runTime += dt;
+      this.difficulty = Math.min(1, this.runTime / CFG.difficultyRampTime);
+      this.speedMult = Math.min(CFG.maxSpeedMult, this.speedMult + CFG.speedRampPerSec * dt);
       const dz = CFG.baseSpeed * this.speedMult * dt; // forward travel this frame
 
       this.updateMap(dz);
@@ -777,9 +841,13 @@ class Game {
 const game = new Game();
 game.init();
 
-// Dev-only: when ?shot is in the URL, auto-start a run (invincible) for capture.
+// Dev-only: when ?shot is in the URL, auto-start a run (invincible) for capture,
+// and fire a fully-charged laser every few seconds so beam visuals get captured.
 if (location.search.includes('shot')) {
   game.invincible = true;
   const tryStart = () => { if (game.state === 'start') game.startRun(); else setTimeout(tryStart, 200); };
   setTimeout(tryStart, 1500);
+  setInterval(() => {
+    if (game.state === 'playing') { game.laserCharge = 1; game.fireLaser(); }
+  }, 500);
 }
