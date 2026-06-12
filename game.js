@@ -36,7 +36,6 @@ const CFG = {
   planeSize: 12,            // target longest-dimension of the plane (bigger!)
   planeResponse: 9,         // how snappily the plane chases the input target
   planeBankAmount: 0.5,     // visual roll when steering
-  mouseSensitivity: 1.0,
 
   // Laser
   laserChargeTime: 30,      // seconds to fully charge
@@ -171,7 +170,6 @@ class Game {
 
     this.input = { left: false, right: false, up: false, down: false };
     this.target = new THREE.Vector3(0, 6, 0);  // where the plane wants to be
-    this.useMouse = false;
 
     this.player = null;
     this.tunnelProto = null;   // sci-fi train tunnel, cloned per map segment
@@ -508,10 +506,20 @@ class Game {
       this.ensureObstacleMesh(o);
       o.userData.active = true;
       o.visible = true;
-      const y = THREE.MathUtils.clamp(CFG.floor + Math.random() * 7, CFG.floor, CFG.ceiling);
+      // Airborne spawning: ~45% of blocks aim at the player's current altitude
+      // (they come AT you), the rest scatter across the full flyable height.
+      let y;
+      if (Math.random() < 0.45 && this.player) {
+        y = this.player.position.y + (Math.random() * 2 - 1);
+      } else {
+        y = CFG.floor + 2 + Math.random() * (CFG.ceiling - CFG.floor - 2);
+      }
+      y = THREE.MathUtils.clamp(y, CFG.floor + 2, CFG.ceiling);
       o.position.set(slots[i] + (Math.random() * 4 - 2), y, z);
       o.rotation.set(Math.random() * 0.5, Math.random() * Math.PI, Math.random() * 0.5);
       o.userData.spin = (Math.random() - 0.5) * 0.6;
+      o.userData.baseY = y;
+      o.userData.bobPhase = Math.random() * Math.PI * 2;
       this.activeObstacles.push(o);
     }
   }
@@ -530,10 +538,15 @@ class Game {
       this.spawnObstacleRow(CFG.obstacleSpawnFarZ);
     }
 
+    const t = performance.now() * 0.001;
     for (let i = this.activeObstacles.length - 1; i >= 0; i--) {
       const o = this.activeObstacles[i];
-      o.position.z += dz;
+      // Blocks close in slightly faster than the world scroll, so they fly AT
+      // you rather than drifting with the scenery.
+      o.position.z += dz * 1.18;
       o.rotation.y += o.userData.spin * dt;
+      // Gentle float/bob so they read as airborne, not parked on the floor.
+      o.position.y = o.userData.baseY + Math.sin(t * 1.4 + o.userData.bobPhase) * 0.7;
       if (o.position.z > CFG.obstacleCullZ) {
         this.releaseObstacle(o);
         this.activeObstacles.splice(i, 1);
@@ -602,14 +615,12 @@ class Game {
 
   // ---- Player movement (pure vector math, framerate-independent) -----------
   updatePlayer(dt) {
-    // Build target from keyboard (mouse path sets target directly in handler).
-    if (!this.useMouse) {
-      const speed = 26 * dt;
-      if (this.input.left)  this.target.x -= speed;
-      if (this.input.right) this.target.x += speed;
-      if (this.input.up)    this.target.y += speed;
-      if (this.input.down)  this.target.y -= speed;
-    }
+    // Build target from keyboard input.
+    const speed = 26 * dt;
+    if (this.input.left)  this.target.x -= speed;
+    if (this.input.right) this.target.x += speed;
+    if (this.input.up)    this.target.y += speed;
+    if (this.input.down)  this.target.y -= speed;
     // Clamp target to the playfield.
     this.target.x = THREE.MathUtils.clamp(this.target.x, -CFG.laneHalfWidth, CFG.laneHalfWidth);
     this.target.y = THREE.MathUtils.clamp(this.target.y, CFG.floor, CFG.ceiling);
@@ -738,7 +749,7 @@ class Game {
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
-      if (keymap[e.code]) { this.input[keymap[e.code]] = true; this.useMouse = false; e.preventDefault(); }
+      if (keymap[e.code]) { this.input[keymap[e.code]] = true; e.preventDefault(); }
       if (e.code === 'Space') {
         // In game -> fire laser. On a menu -> start / restart the run.
         if (this.state === 'playing') this.fireLaser();
@@ -750,16 +761,7 @@ class Game {
       if (keymap[e.code]) { this.input[keymap[e.code]] = false; e.preventDefault(); }
     });
 
-    // Mouse: map cursor position to the playfield target.
-    window.addEventListener('mousemove', (e) => {
-      if (this.state !== 'playing') return;
-      this.useMouse = true;
-      const nx = (e.clientX / window.innerWidth) * 2 - 1;     // -1..1
-      const ny = (e.clientY / window.innerHeight) * 2 - 1;    // -1..1 (down +)
-      this.target.x = nx * CFG.laneHalfWidth * CFG.mouseSensitivity;
-      this.target.y = THREE.MathUtils.mapLinear(-ny, -1, 1, CFG.floor, CFG.ceiling);
-    });
-
+    // Mouse only starts/restarts from menus — it does not steer the plane.
     window.addEventListener('mousedown', () => this.handleAdvance());
   }
 
